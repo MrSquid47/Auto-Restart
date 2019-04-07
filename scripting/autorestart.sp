@@ -3,7 +3,7 @@
 #define DEBUG
 
 #define PLUGIN_AUTHOR "MrSquid"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.0.1"
 
 #define STATUS_DISABLED 0
 #define STATUS_AUTO 1
@@ -12,7 +12,6 @@
 #include <sourcemod>
 #include <sdktools>
 #include <sdkhooks>
-#include <morecolors>
 #include <tf2>
 #include <tf2_stocks>
 
@@ -22,7 +21,7 @@ public Plugin myinfo =
 {
 	name = "Auto Restart", 
 	author = PLUGIN_AUTHOR, 
-	description = "Automatically restarts server without dropping players", 
+	description = "Automatically restarts server without losing player locations", 
 	version = PLUGIN_VERSION, 
 	url = ""
 };
@@ -37,6 +36,8 @@ ConVar restartTime;
 int uptime;
 
 int saveStatus[MAXPLAYERS];
+char saveLoaded[MAXPLAYERS][32];
+int saveLoadIndex;
 bool saveRestoring[MAXPLAYERS];
 int saveTeam[MAXPLAYERS];
 int saveClass[MAXPLAYERS];
@@ -50,7 +51,9 @@ public void OnPluginStart()
 	
 	AutoExecConfig(true, "autorestart", "sourcemod");
 	
-	RegAdminCmd("sm_autorestartnow", Command_autorestartnow, ADMFLAG_RCON, "auto restart server");
+	RegAdminCmd("sm_autorestart", Command_autorestart, ADMFLAG_RCON, "auto restart server");
+	RegAdminCmd("sm_autorestartmap", Command_autorestartmap, ADMFLAG_CHANGEMAP, "auto restart map");
+	
 	RegConsoleCmd("sm_autorestore", Command_autorestore, "restore your position");
 	
 	HookEvent("player_spawn", Event_PlayerSpawn, EventHookMode_Post);
@@ -165,9 +168,35 @@ public Action Timer_restore(Handle timer, int index)
 	saveStatus[index] = STATUS_MANUAL;
 }
 
-public Action Command_autorestartnow(int client, int args)
+public Action Command_autorestart(int client, int args)
 {
 	preRestart();
+	return Plugin_Handled;
+}
+
+public Action Command_autorestartmap(int client, int args)
+{
+	DB_Nuke();
+	
+	ReplyToCommand(client, "[SM] Restarting map...");
+	
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsClientInGame(i) && !IsFakeClient(i))
+		{
+			DB_SavePlayer(i);
+		}
+	}
+	
+	fmap = true;
+	restore = true;
+	for (int i = 0; i < MAXPLAYERS; i++)
+	{
+		strcopy(saveLoaded[i], 32, "");
+	}
+	saveLoadIndex = 0;
+	
+	CreateTimer(1.0, Timer_restartMap);
 	return Plugin_Handled;
 }
 
@@ -191,7 +220,7 @@ void preRestart()
 	
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (IsClientInGame(i))
+		if (IsClientInGame(i) && !IsFakeClient(i))
 		{
 			DB_SavePlayer(i);
 		}
@@ -210,6 +239,13 @@ public Action Timer_restartDelay(Handle timer, int index)
 	restart();
 }
 
+public Action Timer_restartMap(Handle timer, int index)
+{
+	char cmap[32];
+	GetCurrentMap(cmap, sizeof(cmap));
+	ServerCommand("changelevel %s", cmap);
+}
+
 void restart()
 {
 	File lmap = OpenFile(lmapf, "w");
@@ -222,7 +258,7 @@ void restart()
 	{
 		if (IsClientInGame(i))
 		{
-			ClientCommand(i, "retry");
+			KickClient(i, "The server is restarting. Please reconnect to recover your previous location");
 		}
 	}
 	ServerCommand("_restart");
@@ -272,7 +308,22 @@ void CB_DB_LoadPlayer(Database rDB, DBResultSet rs, char[] error, int client)
 		return;
 	}
 	
-	saveStatus[client] = STATUS_AUTO;
+	char sAuth[32];
+	GetClientAuthId(client, AuthId_Steam2, sAuth, sizeof(sAuth));
+	
+	bool found = false;
+	for (int i = 0; i < MAXPLAYERS; i++)
+	{
+		if (StrEqual(saveLoaded[i], sAuth))
+		{
+			saveStatus[client] = STATUS_MANUAL;
+			found = true;
+		}
+	}
+	if (!found) {
+		saveStatus[client] = STATUS_AUTO;
+		strcopy(saveLoaded[saveLoadIndex], 32, sAuth);
+	}
 	saveTeam[client] = rs.FetchInt(0);
 	saveClass[client] = rs.FetchInt(1);
 	savePos[client][0] = rs.FetchFloat(2);
