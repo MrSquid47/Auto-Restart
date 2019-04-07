@@ -2,7 +2,9 @@
 Automatically restart server without losing player locations.
 
 ## Commands
-`sm_autorestartnow` - Manual restart of the server
+`sm_autorestart` - Manual restart of the server
+
+`sm_autorestartmap` - Restart the map
 
 `sm_autorestore` - Restore to saved location
 
