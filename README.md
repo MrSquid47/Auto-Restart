@@ -1,5 +1,5 @@
 # Auto-Restart
-Automatically restart server without dropping players.
+Automatically restart server without losing player locations.
 
 ## Commands
 `sm_autorestartnow` - Manual restart of the server
